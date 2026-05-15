@@ -13,7 +13,7 @@
 3. [Step 3 — User 엔티티 & 회원가입](#step-3--user-엔티티--회원가입)
 4. [Step 4 — JWT 발급 & 로그인](#step-4--jwt-발급--로그인)
 5. [Step 5 — Spring Security + JWT 필터](#step-5--spring-security--jwt-필터)
-6. [Step 6 — Refresh Token (DB 기반)](#step-6--refresh-token-db-기반)
+6. [Step 6 — Refresh Token (Redis 기반)](#step-6--refresh-token-redis-기반)
 7. [Step 7 — Category & Post CRUD](#step-7--category--post-crud)
 8. [Step 8 — Comment CRUD](#step-8--comment-crud)
 9. [Step 9 — Info(정보) 도메인 CRUD & 이미지 업로드](#step-9--info정보-도메인-crud--이미지-업로드)
@@ -42,9 +42,9 @@
 
 | 영역 | 스택 |
 |---|---|
-| Backend | Java 21, Spring Boot 3.5, Spring Security 6, Spring Data JPA |
-| 인증 | JWT (Access + Refresh, DB 저장) |
-| DB | PostgreSQL 16 |
+| Backend | Java 21, Spring Boot 3.5, Spring Security 6, Spring Data JPA, Spring Data Redis |
+| 인증 | JWT (Access + Refresh, Redis 저장) |
+| DB | PostgreSQL 16, Redis 7 |
 | 빌드 | Gradle |
 | 배포 | Docker, Nginx, AWS EC2, GitHub Actions |
 
@@ -64,7 +64,7 @@ com.hub.backend
 └── exception      ← 공통 예외 / 핸들러
 ```
 
-엔티티 클래스는 단수형(`User`, `Post`, `Comment`, `Category`, `RefreshToken`).
+엔티티 클래스는 단수형(`User`, `Post`, `Comment`, `Category`). Refresh Token은 엔티티가 아닌 Redis 키(`refresh:{userId}`)로 관리한다.
 
 ---
 
@@ -109,6 +109,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
 
     // JWT
@@ -869,7 +870,7 @@ JWT Access Token + Refresh Token을 발급하는 로그인 API를 만든다.
 
 - **Access Token**: 짧은 수명(30분). 매 API 요청의 `Authorization: Bearer ...` 헤더에 실어 보낸다.
 - **Refresh Token**: 긴 수명(7일). HttpOnly 쿠키로만 주고받으며, 만료된 Access Token을 재발급할 때만 쓴다.
-- 본 사양서는 `refresh_tokens` 테이블을 두므로, Refresh Token을 PostgreSQL에 저장한다(Redis 미사용).
+- Refresh Token은 Redis에 `refresh:{userId}` 키로 저장한다(TTL은 토큰 유효기간과 동일). 자세한 구현은 Step 6.
 
 ## 코드
 
@@ -1102,7 +1103,7 @@ public class AuthService {
 }
 ```
 
-> `refresh` 토큰을 DB에 저장하는 로직은 Step 6에서 `RefreshToken` 엔티티가 생긴 뒤 추가한다.
+> `refresh` 토큰을 Redis에 저장하는 로직은 Step 6에서 `RefreshTokenService`와 함께 추가한다.
 
 ### 4-5. AuthController
 
@@ -1429,98 +1430,123 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/users/me
 
 ---
 
-# Step 6 — Refresh Token (DB 기반)
+# Step 6 — Refresh Token (Redis 기반)
 
 ## 목표
 
-Refresh Token을 PostgreSQL `refresh_tokens` 테이블에 저장하고, 토큰 재발급(`/api/auth/reissue`) 및 로그아웃(`/api/auth/logout`)을 구현한다.
+Refresh Token을 Redis에 저장하고, 토큰 재발급(`/api/auth/reissue`) 및 로그아웃(`/api/auth/logout`)을 구현한다.
 
 ## 개념
 
-Redis가 빠르고 TTL을 자체 지원해 편하지만, 본 사양의 MVP는 Redis를 쓰지 않는다. 대신 `refresh_tokens` 테이블에 (userId 1:1) 형태로 저장하고 `expiresAt` 컬럼으로 만료를 관리한다. 만료된 행은 스케줄러나 lazy 검증으로 정리한다(본 실습은 lazy 검증).
+Redis는 인메모리 K/V 스토어로 빠르고, 키마다 **TTL을 자체 지원**한다. Refresh Token을 `refresh:{userId}` 키에 저장하고 토큰 유효기간을 그대로 TTL로 걸어두면, 만료된 키는 Redis가 알아서 지워준다. 별도의 만료 컬럼/`isExpired()` 검증/cleanup 스케줄러가 필요 없다 — DB 테이블 + 엔티티 + 리포지토리도 통째로 사라진다.
+
+같은 userId에 다시 `set` 하면 값과 TTL이 함께 갱신되므로 **회전(rotate)도 한 줄**이다. 인프라(Redis 컨테이너 1개)는 늘지만 코드가 크게 줄고, 추후 조회수 캐싱·세션 등으로도 재사용할 수 있다는 점이 장점.
+
+## 준비 — Redis 컨테이너 띄우기
+
+Step 1의 PostgreSQL과 같은 방식으로 Docker로 띄운다.
+
+```bash
+docker run -d --name infohub-redis -p 6379:6379 redis:7-alpine
+```
+
+확인:
+
+```bash
+docker exec -it infohub-redis redis-cli ping
+# PONG
+```
 
 ## 코드
 
-### 6-1. RefreshToken 엔티티
+### 6-1. Redis 의존성 추가
 
-`backend/src/main/java/com/hub/backend/entity/RefreshToken.java`:
+`backend/build.gradle`의 dependencies 블록에 추가:
+
+```groovy
+implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+```
+
+Spring Boot가 `StringRedisTemplate`을 자동 구성해 주므로 별도 `@Configuration` 클래스는 필요 없다.
+
+### 6-2. application.yml에 Redis 설정 추가
+
+`backend/src/main/resources/application-dev.yml`의 `spring:` 하위에 추가:
+
+```yaml
+spring:
+  # ... (기존 datasource, jpa 그대로 두고)
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+```
+
+`backend/src/main/resources/application-prod.yml`도 동일한 위치에:
+
+```yaml
+spring:
+  # ... 생략
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+```
+
+### 6-3. RefreshTokenService (Redis 기반)
+
+엔티티 / JPA 리포지토리 대신 **Service 하나만** 둔다.
+
+`backend/src/main/java/com/hub/backend/service/RefreshTokenService.java`:
 
 ```java
-package com.hub.backend.entity;
+package com.hub.backend.service;
 
-import jakarta.persistence.*;
-import lombok.AccessLevel;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import org.hibernate.annotations.CreationTimestamp;
+import java.time.Duration;
 
-import java.time.LocalDateTime;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Service;
 
-@Entity
-@Table(name = "refresh_tokens", indexes = {
-        @Index(name = "idx_refresh_user", columnList = "user_id", unique = true)
-})
-@Getter
-@NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class RefreshToken {
+import com.hub.backend.security.JwtTokenProvider;
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+import lombok.RequiredArgsConstructor;
 
-    @Column(name = "user_id", nullable = false)
-    private Long userId;
+@Service
+@RequiredArgsConstructor
+public class RefreshTokenService {
 
-    @Column(nullable = false, length = 1000)
-    private String token;
+    private static final String KEY_PREFIX = "refresh:";
 
-    @Column(nullable = false)
-    private LocalDateTime expiresAt;
+    private final StringRedisTemplate redisTemplate;
+    private final JwtTokenProvider jwtTokenProvider;
 
-    @CreationTimestamp
-    @Column(updatable = false)
-    private LocalDateTime createdAt;
-
-    @Builder
-    public RefreshToken(Long userId, String token, LocalDateTime expiresAt) {
-        this.userId = userId;
-        this.token = token;
-        this.expiresAt = expiresAt;
+    public void save(Long userId, String token) {
+        redisTemplate.opsForValue().set(
+                key(userId),
+                token,
+                Duration.ofMillis(jwtTokenProvider.getRefreshTokenValidity())
+        );
     }
 
-    public void rotate(String newToken, LocalDateTime newExpiresAt) {
-        this.token = newToken;
-        this.expiresAt = newExpiresAt;
+    public String find(Long userId) {
+        return redisTemplate.opsForValue().get(key(userId));
     }
 
-    public boolean isExpired() {
-        return LocalDateTime.now().isAfter(expiresAt);
+    public void delete(Long userId) {
+        redisTemplate.delete(key(userId));
+    }
+
+    private String key(Long userId) {
+        return KEY_PREFIX + userId;
     }
 }
 ```
 
-### 6-2. RefreshTokenRepository
+> `set(key, value, Duration)` 한 줄로 값 저장과 TTL 설정이 동시에 끝난다. 회전도 같은 키에 다시 `save()`만 호출하면 끝.
 
-`backend/src/main/java/com/hub/backend/repository/RefreshTokenRepository.java`:
-
-```java
-package com.hub.backend.repository;
-
-import com.hub.backend.entity.RefreshToken;
-import org.springframework.data.jpa.repository.JpaRepository;
-
-import java.util.Optional;
-
-public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
-
-    Optional<RefreshToken> findByUserId(Long userId);
-
-    void deleteByUserId(Long userId);
-}
-```
-
-### 6-3. AuthService 확장
+### 6-4. AuthService 확장
 
 Step 4의 `AuthService.login()`에 Refresh Token 저장 로직을 추가하고, `reissue` / `logout` 메서드를 신설한다.
 
@@ -1529,21 +1555,19 @@ Step 4의 `AuthService.login()`에 Refresh Token 저장 로직을 추가하고, 
 ```java
 package com.hub.backend.service;
 
-import com.hub.backend.dto.LoginRequest;
-import com.hub.backend.dto.LoginResult;
-import com.hub.backend.entity.RefreshToken;
-import com.hub.backend.entity.User;
-import com.hub.backend.exception.CustomException;
-import com.hub.backend.exception.ErrorCode;
-import com.hub.backend.repository.RefreshTokenRepository;
-import com.hub.backend.repository.UserRepository;
-import com.hub.backend.security.JwtTokenProvider;
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import com.hub.backend.dto.LoginRequest;
+import com.hub.backend.dto.LoginResult;
+import com.hub.backend.entity.User;
+import com.hub.backend.exception.CustomException;
+import com.hub.backend.exception.ErrorCode;
+import com.hub.backend.repository.UserRepository;
+import com.hub.backend.security.JwtTokenProvider;
+
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -1551,11 +1575,10 @@ import java.time.LocalDateTime;
 public class AuthService {
 
     private final UserRepository userRepository;
-    private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final RefreshTokenService refreshTokenService;
 
-    @Transactional
     public LoginResult login(LoginRequest request) {
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
@@ -1568,22 +1591,20 @@ public class AuthService {
                 user.getId(), user.getEmail(), user.getRole().name());
         String refresh = jwtTokenProvider.createRefreshToken(user.getId());
 
-        saveOrRotate(user.getId(), refresh);
+        refreshTokenService.save(user.getId(), refresh);
 
         return new LoginResult(access, refresh, user);
     }
 
-    @Transactional
     public String reissue(String refreshToken) {
         if (!jwtTokenProvider.validate(refreshToken)) {
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
 
         Long userId = jwtTokenProvider.getUserId(refreshToken);
-        RefreshToken stored = refreshTokenRepository.findByUserId(userId)
-                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_TOKEN));
+        String stored = refreshTokenService.find(userId);
 
-        if (stored.isExpired() || !stored.getToken().equals(refreshToken)) {
+        if (stored == null || !stored.equals(refreshToken)) {
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
 
@@ -1594,37 +1615,20 @@ public class AuthService {
                 user.getId(), user.getEmail(), user.getRole().name());
         String newRefresh = jwtTokenProvider.createRefreshToken(user.getId());
 
-        stored.rotate(newRefresh, expiry());
+        refreshTokenService.save(user.getId(), newRefresh);
+
         return newAccess;
     }
 
-    @Transactional
     public void logout(Long userId) {
-        refreshTokenRepository.deleteByUserId(userId);
-    }
-
-    private void saveOrRotate(Long userId, String token) {
-        refreshTokenRepository.findByUserId(userId)
-                .ifPresentOrElse(
-                        existing -> existing.rotate(token, expiry()),
-                        () -> refreshTokenRepository.save(
-                                RefreshToken.builder()
-                                        .userId(userId)
-                                        .token(token)
-                                        .expiresAt(expiry())
-                                        .build()
-                        )
-                );
-    }
-
-    private LocalDateTime expiry() {
-        return LocalDateTime.now()
-                .plusNanos(jwtTokenProvider.getRefreshTokenValidity() * 1_000_000);
+        refreshTokenService.delete(userId);
     }
 }
 ```
 
-### 6-4. AuthController 확장
+DB 기반 버전과 비교: `RefreshToken` 엔티티/리포지토리, `saveOrRotate()` 분기, `expiry()` 계산, `isExpired()` 검사, 메서드 단위 `@Transactional` — 전부 사라졌다.
+
+### 6-5. AuthController 확장
 
 `AuthController`에 `/reissue`, `/logout` 추가:
 
@@ -1636,18 +1640,12 @@ import java.util.Arrays;
 // ... 기존 코드 안에 추가:
 
     @PostMapping("/reissue")
-    public ApiResponse<LoginResponse> reissue(
-            HttpServletRequest request,
-            HttpServletResponse response
-    ) {
+    public ApiResponse<LoginResponse> reissue(HttpServletRequest request) {
         String refreshToken = readCookie(request, "refreshToken");
         if (refreshToken == null) {
-            return ApiResponse.fail("Refresh Token이 없습니다.")
-                    .let(r -> { throw new RuntimeException(); });  // 사실은 throw하는 게 맞다
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
-
         String newAccess = authService.reissue(refreshToken);
-        // 사용자 정보를 같이 내려주려면 토큰에서 userId 꺼내 조회
         return ApiResponse.ok("토큰이 재발급되었습니다.",
                 new LoginResponse(newAccess, "Bearer", null));
     }
@@ -1678,26 +1676,13 @@ import java.util.Arrays;
     }
 ```
 
-> 위 `/reissue`의 `let(...)` 부분은 의도적인 가독성용 의사코드다. 실제로는 다음과 같이 정리:
-
-```java
-    @PostMapping("/reissue")
-    public ApiResponse<LoginResponse> reissue(HttpServletRequest request) {
-        String refreshToken = readCookie(request, "refreshToken");
-        if (refreshToken == null) {
-            throw new CustomException(ErrorCode.INVALID_TOKEN);
-        }
-        String newAccess = authService.reissue(refreshToken);
-        return ApiResponse.ok("토큰이 재발급되었습니다.",
-                new LoginResponse(newAccess, "Bearer", null));
-    }
-```
-
 ## 포인트
 
-- **Rotation**: `reissue()` 호출 시 새 Refresh Token을 발급하고 기존 행을 갱신한다. 탈취된 토큰으로 재발급을 시도하면, 정상 사용자의 토큰과 충돌하여 다음 사용자 요청에서 `INVALID_TOKEN`이 떨어진다 → 사용자 입장에서 "로그아웃됨" 신호.
-- **lazy 만료 검증**: `isExpired()`를 reissue마다 검사하므로 따로 cleanup 스케줄러가 없어도 보안상 문제는 없다. 단, 테이블이 무한히 커지는 것을 막으려면 주기 배치(Spring `@Scheduled`)로 정리해줘야 한다.
-- **`deleteByUserId`**: `@Modifying` 없이 동작하지만 트랜잭션이 필요하다. 위 코드에서는 `@Transactional`이 메서드 단위로 걸려 있다.
+- **TTL 위임**: 만료는 Redis가 관리한다. 키가 살아 있으면 유효, 없으면 만료. `isExpired()` 같은 메서드를 직접 짤 필요가 없다.
+- **Rotation**: 같은 키 `refresh:{userId}`에 `set`을 다시 호출하면 값과 TTL이 동시에 갱신된다. 별도 update 로직이 없다.
+- **트랜잭션 경계**: Redis 호출은 JPA 트랜잭션에 묶이지 않는다. `@Transactional`은 User 조회용으로만 의미가 있고, Refresh Token 저장/삭제는 트랜잭션 롤백과 무관하다. 로그인 직후 토큰이 발급됐는데 사용자에게 응답이 가지 않는 케이스(예: 네트워크 단절)는 가능하지만, MVP에서는 무시한다.
+- **데이터 영속성**: 기본적으로 Redis는 인메모리다. 컨테이너가 죽으면 모든 사용자가 강제 로그아웃된다. 운영에서는 AOF(`--appendonly yes`) 또는 RDB 스냅샷을 켜둔다.
+- **인프라 비용 vs 코드량**: Redis 컨테이너 하나가 늘었지만, 엔티티 + 리포지토리 + 만료 검증 + 정리 스케줄러를 통째로 안 짜도 된다. 추후 조회수 캐싱(Step 7 메모), 세션, 분산 락 등에서도 같은 인스턴스를 재활용할 수 있다.
 
 ## 정상 동작 기준
 
@@ -1707,9 +1692,23 @@ curl -i -c cookie.txt -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"demo@infohub.dev","password":"password123"}'
 
+# Redis에 키가 저장됐는지 확인
+docker exec -it infohub-redis redis-cli
+> KEYS refresh:*
+1) "refresh:1"
+> TTL refresh:1
+(integer) 604800     # 7일(초)
+> GET refresh:1
+"eyJhbGciOi..."
+
 # 재발급 (쿠키 사용)
 curl -b cookie.txt -X POST http://localhost:8080/api/auth/reissue
 # {"success":true,"message":"토큰이 재발급되었습니다.","data":{...}}
+
+# 로그아웃 → 키 삭제 확인
+curl -b cookie.txt -H "Authorization: Bearer <accessToken>" \
+  -X POST http://localhost:8080/api/auth/logout
+# redis-cli> GET refresh:1 → (nil)
 ```
 
 ---
@@ -3558,6 +3557,13 @@ services:
       - pgdata:/var/lib/postgresql/data
     networks: [infohub]
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    networks: [infohub]
+
   backend:
     build: ./backend
     environment:
@@ -3566,7 +3572,9 @@ services:
       DB_USERNAME: ${DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
-    depends_on: [postgres]
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on: [postgres, redis]
     networks: [infohub]
     expose:
       - "8080"
@@ -3588,11 +3596,14 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
 
 networks:
   infohub:
     driver: bridge
 ```
+
+> `--appendonly yes`로 AOF 영속화를 켜둔다. 컨테이너 재시작 시 Refresh Token 키가 사라져 전 사용자가 강제 로그아웃되는 사태를 막을 수 있다.
 
 ### 10-4. nginx.conf
 
@@ -3739,7 +3750,7 @@ docker compose --env-file .env up -d --build
 
 - GitHub Actions 빌드 성공 (`Deploy via SSH` step까지 녹색).
 - `http://<EC2_IP>/` 에서 메인 페이지가 보이고, `http://<EC2_IP>/api/health`가 200 응답.
-- `docker compose ps` 결과 4개 컨테이너(`postgres`, `backend`, `frontend`, `nginx`) 모두 `Up` 상태.
+- `docker compose ps` 결과 5개 컨테이너(`postgres`, `redis`, `backend`, `frontend`, `nginx`) 모두 `Up` 상태.
 
 ---
 
@@ -3754,8 +3765,13 @@ posts (id, title, content, user_id, category_id, view_count, created_at, updated
    │ N                          ▼
 comments (id, post_id, user_id, content, created_at, updated_at)
                               categories (id, code, label)
+```
 
-refresh_tokens (id, user_id [unique], token, expires_at, created_at)
+Refresh Token은 PostgreSQL이 아닌 Redis에 저장된다.
+
+```
+Redis
+  refresh:{userId}  →  <JWT refresh token>   (TTL = refresh-token-validity)
 ```
 
 # 부록 B — API 한눈에 보기
