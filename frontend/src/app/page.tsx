@@ -1,87 +1,102 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import PostCard from "@/components/PostCard";
-import { MOCK_POSTS } from "@/lib/mockData";
+import InfoGrid from "@/components/InfoGrid";
+import { MOCK_INFOS } from "@/lib/infoData";
 import { CATEGORIES } from "@/lib/categories";
+import { CategoryKey } from "@/types";
 
 export default function HomePage() {
-  const popular = [...MOCK_POSTS]
-    .sort((a, b) => b.viewCount - a.viewCount)
-    .slice(0, 3);
-  const recent = [...MOCK_POSTS]
-    .sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    )
-    .slice(0, 4);
+  const [category, setCategory] = useState<CategoryKey | "ALL">("ALL");
+  const [keyword, setKeyword] = useState("");
+
+  const filtered = useMemo(() => {
+    let list = MOCK_INFOS;
+    if (category !== "ALL") list = list.filter((i) => i.category === category);
+    if (keyword.trim()) {
+      const k = keyword.trim().toLowerCase();
+      list = list.filter(
+        (i) =>
+          i.title.toLowerCase().includes(k) ||
+          i.tags.some((t) => t.toLowerCase().includes(k))
+      );
+    }
+    return list;
+  }, [category, keyword]);
+
+  const tabs: { key: CategoryKey | "ALL"; label: string }[] = [
+    { key: "ALL", label: "전체" },
+    ...CATEGORIES.map((c) => ({ key: c.key, label: c.label })),
+  ];
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-8">
       <section className="rounded-2xl bg-gradient-to-br from-brand-600 to-brand-700 p-8 text-white">
         <h1 className="text-2xl font-bold sm:text-3xl">
-          최신 트렌드와 인사이트, InfoHub에서.
+          정보를 탐색하고, 인사이트를 얻으세요.
         </h1>
         <p className="mt-2 text-sm text-brand-50 sm:text-base">
-          개발 · AI · 트렌드 · 자유 — 관심사로 모이고, 글로 소통하세요.
+          개발 · AI · 트렌드 — 큐레이션된 정보 카드를 한눈에.
         </p>
-        <div className="mt-5 flex gap-2">
+      </section>
+
+      <section>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-gray-900">
+            정보 둘러보기
+          </h2>
+          <div className="flex items-center gap-2">
+            <input
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder="제목 · 태그 검색"
+              className="w-56 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none"
+            />
+            <Link
+              href="/info/new"
+              className="rounded-md bg-brand-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+            >
+              + 정보 작성
+            </Link>
+          </div>
+        </div>
+
+        <div className="mb-5 flex flex-wrap gap-2">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setCategory(tab.key)}
+              className={
+                category === tab.key
+                  ? "rounded-full bg-brand-600 px-4 py-1.5 text-sm font-medium text-white"
+                  : "rounded-full border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+              }
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <InfoGrid items={filtered} />
+      </section>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">
+              자유롭게 이야기 나누고 싶다면?
+            </h3>
+            <p className="mt-1 text-sm text-gray-500">
+              커뮤니티 게시판에서 다른 사용자들과 의견을 주고받아 보세요.
+            </p>
+          </div>
           <Link
             href="/posts"
-            className="rounded-md bg-white px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50"
+            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
           >
-            게시글 둘러보기
+            커뮤니티 가기 →
           </Link>
-          <Link
-            href="/signup"
-            className="rounded-md border border-white/40 px-4 py-2 text-sm font-medium hover:bg-white/10"
-          >
-            회원가입
-          </Link>
-        </div>
-      </section>
-
-      <section>
-        <div className="mb-3 flex items-end justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">카테고리</h2>
-          <Link href="/posts" className="text-xs text-gray-500 hover:underline">
-            전체 보기 →
-          </Link>
-        </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {CATEGORIES.map((c) => (
-            <Link
-              key={c.key}
-              href={`/posts?category=${c.key}`}
-              className="rounded-lg border border-gray-200 bg-white p-4 text-center hover:border-brand-500"
-            >
-              <div className="text-sm font-semibold text-gray-900">
-                {c.label}
-              </div>
-              <div className="mt-1 text-xs text-gray-500">바로가기</div>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-lg font-semibold text-gray-900">🔥 인기글</h2>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {popular.map((p) => (
-            <PostCard key={p.id} post={p} />
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <div className="mb-3 flex items-end justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">📰 최신글</h2>
-          <Link href="/posts" className="text-xs text-gray-500 hover:underline">
-            더보기 →
-          </Link>
-        </div>
-        <div className="grid gap-3">
-          {recent.map((p) => (
-            <PostCard key={p.id} post={p} />
-          ))}
         </div>
       </section>
     </div>

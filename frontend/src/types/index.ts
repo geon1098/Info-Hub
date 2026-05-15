@@ -42,3 +42,28 @@ export interface ApiResponse<T> {
   message: string;
   data: T;
 }
+
+export interface Info {
+  id: number;
+  title: string;
+  imageUrl: string;
+  tags: string[];
+  category: CategoryKey;
+  summary?: string;
+  author: string;
+  authorId: number;
+  createdAt: string;
+  updatedAt: string;
+  /**
+   * 본문. 문단은 빈 줄로 구분하고, 인라인 이미지는 `![alt](url)` 마크다운 문법을 사용한다.
+   */
+  body: string;
+}
+
+export interface InfoDraft {
+  title: string;
+  imageUrl: string;
+  tags: string[];
+  category: CategoryKey;
+  body: string;
+}

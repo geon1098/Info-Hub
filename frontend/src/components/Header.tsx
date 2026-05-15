@@ -19,7 +19,7 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
         <Link href="/" className="flex items-center gap-2">
           <span className="text-lg font-bold text-brand-600">InfoHub</span>
           <span className="hidden text-xs text-gray-500 sm:inline">
@@ -29,6 +29,16 @@ export default function Header() {
 
         <nav className="flex items-center gap-3 text-sm">
           <Link
+            href="/"
+            className={
+              pathname === "/"
+                ? "font-semibold text-brand-600"
+                : "text-gray-700 hover:text-brand-600"
+            }
+          >
+            정보
+          </Link>
+          <Link
             href="/posts"
             className={
               pathname.startsWith("/posts")
@@ -36,7 +46,7 @@ export default function Header() {
                 : "text-gray-700 hover:text-brand-600"
             }
           >
-            게시글
+            커뮤니티
           </Link>
 
           {user ? (

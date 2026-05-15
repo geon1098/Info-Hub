@@ -46,7 +46,7 @@ export default function PostListPage() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">게시글</h1>
+        <h1 className="text-xl font-bold text-gray-900">커뮤니티 게시판</h1>
         <input
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
