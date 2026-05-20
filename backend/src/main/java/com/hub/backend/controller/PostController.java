@@ -31,9 +31,9 @@ public class PostController {
 	
 	@GetMapping
 	public ApiResponse<PageResponse<PostResponse>> list(
-			@RequestParam(required = false) String category,
-			@RequestParam(defaultValue = "0") int page,
-			@RequestParam(defaultValue = "10") int size
+			@RequestParam(value = "category", required = false) String category,
+			@RequestParam(value = "page", defaultValue = "0") int page,
+			@RequestParam(value = "size", defaultValue = "10") int size
 			){
 		return ApiResponse.ok(postService.findPosts(category, page, size));
 	}

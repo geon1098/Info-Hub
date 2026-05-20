@@ -2,9 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import axios from "axios";
 import { CATEGORIES } from "@/lib/categories";
-import { CategoryKey } from "@/types";
+import { CategoryKey, Post } from "@/types";
 import { useAuth } from "@/lib/authStore";
+import { api } from "@/lib/api";
 
 export default function PostWritePage() {
   const router = useRouter();
@@ -14,6 +16,7 @@ export default function PostWritePage() {
   const [content, setContent] = useState("");
   const [category, setCategory] = useState<CategoryKey>("DEV");
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -22,7 +25,9 @@ export default function PostWritePage() {
     }
   }, [user, router]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  if (!user) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -35,9 +40,20 @@ export default function PostWritePage() {
       return;
     }
 
-    // TODO: POST /api/posts 연결
-    alert("게시글이 등록되었습니다 (mock).");
-    router.push("/posts");
+    try {
+      setSubmitting(true);
+      const res = await api.post<{ data: Post }>("/posts", { title, content, category });
+      alert("게시글이 등록되었습니다.");
+      router.push(`/posts/${res.data.data.id}`);
+    } catch (err) {
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "등록에 실패했습니다.";
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -106,9 +122,10 @@ export default function PostWritePage() {
           </button>
           <button
             type="submit"
-            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            disabled={submitting}
+            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            등록
+            {submitting ? "등록 중..." : "등록"}
           </button>
         </div>
       </form>

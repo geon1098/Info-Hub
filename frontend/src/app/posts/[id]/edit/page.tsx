@@ -1,27 +1,48 @@
 "use client";
 
 import { notFound, useRouter } from "next/navigation";
-import { useEffect, useState, use } from "react";
+import { useEffect, useState } from "react";
+import axios from "axios";
 import { CATEGORIES } from "@/lib/categories";
-import { CategoryKey } from "@/types";
-import { MOCK_POSTS } from "@/lib/mockData";
+import { CategoryKey, Post } from "@/types";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/authStore";
 
 export default function PostEditPage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: { id: string };
 }) {
-  const { id } = use(params);
+  const { id } = params;
   const router = useRouter();
   const { user } = useAuth();
-  const post = MOCK_POSTS.find((p) => String(p.id) === id);
 
-  const [title, setTitle] = useState(post?.title ?? "");
-  const [content, setContent] = useState(post?.content ?? "");
-  const [category, setCategory] = useState<CategoryKey>(
-    post?.category ?? "DEV"
-  );
+  const [post, setPost] = useState<Post | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notFoundFlag, setNotFoundFlag] = useState(false);
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [category, setCategory] = useState<CategoryKey>("DEV");
+
+  useEffect(() => {
+    const fetchPost = async () => {
+      try {
+        const res = await api.get<{ data: Post }>(`/posts/${id}`);
+        const p = res.data.data;
+        setPost(p);
+        setTitle(p.title);
+        setContent(p.content);
+        setCategory(p.category);
+      } catch (err) {
+        if (axios.isAxiosError(err) && err.response?.status === 404) {
+          setNotFoundFlag(true);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPost();
+  }, [id]);
 
   useEffect(() => {
     if (!post) return;
@@ -31,17 +52,26 @@ export default function PostEditPage({
     }
   }, [user, post, id, router]);
 
-  if (!post) return notFound();
+  if (notFoundFlag) return notFound();
+  if (loading || !post) return <p className="py-12 text-center text-sm text-gray-400">불러오는 중...</p>;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !content.trim()) {
       alert("제목과 내용을 모두 입력해주세요.");
       return;
     }
-    // TODO: PUT /api/posts/{id} 연결
-    alert("수정되었습니다 (mock).");
-    router.push(`/posts/${id}`);
+    try {
+      await api.put(`/posts/${id}`, { title, content, category });
+      alert("수정되었습니다.");
+      router.push(`/posts/${id}`);
+    } catch (err) {
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "수정에 실패했습니다.";
+      alert(message);
+    }
   };
 
   return (

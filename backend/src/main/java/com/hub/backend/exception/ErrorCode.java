@@ -29,8 +29,16 @@ public enum ErrorCode {
 	
 	COMMENT_NOT_FOUND(404, "댓글을 찾을 수 없습니다."),
 	COMMENT_FORBIDDEN(403, "댓글에 대한 권한이 없습니다."),
-	
-	CATEGORY_NOT_FOUND(404, "카테고리를 찾을 수 없습니다.");
+
+	CATEGORY_NOT_FOUND(404, "카테고리를 찾을 수 없습니다."),
+
+	INFO_NOT_FOUND(404, "정보를 찾을 수 없습니다."),
+	INFO_FORBIDDEN(403, "정보에 대한 권한이 없습니다."),
+
+	FILE_EMPTY(400, "업로드된 파일이 비어 있습니다."),
+	FILE_TOO_LARGE(400, "파일 크기가 너무 큽니다."),
+	FILE_UNSUPPORTED_TYPE(400, "지원하지 않는 파일 형식입니다."),
+	FILE_STORE_FAILED(500, "파일 저장에 실패했습니다.");
 	
 	private final int status;
 	private final String message;

@@ -2,68 +2,108 @@
 
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
-import { useMemo, useState, use } from "react";
+import { useEffect, useState } from "react";
+import axios from "axios";
 import CommentList from "@/components/CommentList";
-import { MOCK_COMMENTS, MOCK_POSTS } from "@/lib/mockData";
 import { categoryLabel } from "@/lib/categories";
 import { useAuth } from "@/lib/authStore";
-import { Comment } from "@/types";
+import { api } from "@/lib/api";
+import { Comment, Post } from "@/types";
 
 export default function PostDetailPage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: { id: string };
 }) {
-  const { id } = use(params);
+  const { id } = params;
   const router = useRouter();
   const { user } = useAuth();
 
-  const post = useMemo(
-    () => MOCK_POSTS.find((p) => String(p.id) === id),
-    [id]
-  );
+  const [post, setPost] = useState<Post | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFoundFlag, setNotFoundFlag] = useState(false);
 
-  const [comments, setComments] = useState<Comment[]>(
-    MOCK_COMMENTS.filter((c) => String(c.postId) === id)
-  );
+  useEffect(() => {
+    const fetchAll = async () => {
+      setLoading(true);
+      try {
+        const [postRes, commentsRes] = await Promise.all([
+          api.get<{ data: Post }>(`/posts/${id}`),
+          api.get<{ data: Comment[] }>(`/posts/${id}/comments`),
+        ]);
+        setPost(postRes.data.data);
+        setComments(commentsRes.data.data);
+      } catch (err) {
+        if (axios.isAxiosError(err) && err.response?.status === 404) {
+          setNotFoundFlag(true);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAll();
+  }, [id]);
 
-  if (!post) return notFound();
+  if (notFoundFlag) return notFound();
+  if (loading || !post) return <p className="py-12 text-center text-sm text-gray-400">불러오는 중...</p>;
 
   const isOwner = user?.id === post.authorId;
   const isAdmin = user?.role === "ADMIN";
 
-  const handleDeletePost = () => {
+  const handleDeletePost = async () => {
     if (!confirm("게시글을 삭제하시겠습니까?")) return;
-    // TODO: DELETE /api/posts/{id} 연결
-    alert("삭제되었습니다 (mock).");
-    router.push("/posts");
+    try {
+      await api.delete(`/posts/${id}`);
+      alert("삭제되었습니다.");
+      router.push("/posts");
+    } catch (err) {
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "삭제에 실패했습니다.";
+      alert(message);
+    }
   };
 
-  const handleCreateComment = (content: string) => {
-    if (!user) return;
-    const newComment: Comment = {
-      id: Date.now(),
-      postId: Number(id),
-      author: user.nickname,
-      authorId: user.id,
-      content,
-      createdAt: new Date().toISOString(),
-    };
-    setComments((prev) => [...prev, newComment]);
-    // TODO: POST /api/posts/{id}/comments 연결
+  const handleCreateComment = async (content: string) => {
+    try {
+      const res = await api.post<{ data: Comment }>(`/posts/${id}/comments`, { content });
+      setComments((prev) => [...prev, res.data.data]);
+    } catch (err) {
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "댓글 작성에 실패했습니다.";
+      alert(message);
+    }
   };
 
-  const handleUpdateComment = (commentId: number, content: string) => {
-    setComments((prev) =>
-      prev.map((c) => (c.id === commentId ? { ...c, content } : c))
-    );
-    // TODO: PUT /api/comments/{id} 연결
+  const handleUpdateComment = async (commentId: number, content: string) => {
+    try {
+      const res = await api.put<{ data: Comment }>(`/comments/${commentId}`, { content });
+      setComments((prev) => prev.map((c) => (c.id === commentId ? res.data.data : c)));
+    } catch (err) {
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "댓글 수정에 실패했습니다.";
+      alert(message);
+    }
   };
 
-  const handleDeleteComment = (commentId: number) => {
+  const handleDeleteComment = async (commentId: number) => {
     if (!confirm("댓글을 삭제하시겠습니까?")) return;
-    setComments((prev) => prev.filter((c) => c.id !== commentId));
-    // TODO: DELETE /api/comments/{id} 연결
+    try {
+      await api.delete(`/comments/${commentId}`);
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch (err) {
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "댓글 삭제에 실패했습니다.";
+      alert(message);
+    }
   };
 
   return (

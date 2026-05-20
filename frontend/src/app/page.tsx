@@ -1,28 +1,62 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import axios from "axios";
 import InfoGrid from "@/components/InfoGrid";
-import { MOCK_INFOS } from "@/lib/infoData";
 import { CATEGORIES } from "@/lib/categories";
-import { CategoryKey } from "@/types";
+import { CategoryKey, Info } from "@/types";
+import { useAuth } from "@/lib/authStore";
+import { api } from "@/lib/api";
+
+interface PageData {
+  content: Info[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  last: boolean;
+}
 
 export default function HomePage() {
   const [category, setCategory] = useState<CategoryKey | "ALL">("ALL");
   const [keyword, setKeyword] = useState("");
+  const [items, setItems] = useState<Info[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
 
-  const filtered = useMemo(() => {
-    let list = MOCK_INFOS;
-    if (category !== "ALL") list = list.filter((i) => i.category === category);
-    if (keyword.trim()) {
-      const k = keyword.trim().toLowerCase();
-      list = list.filter(
-        (i) =>
-          i.title.toLowerCase().includes(k) ||
-          i.tags.some((t) => t.toLowerCase().includes(k))
-      );
-    }
-    return list;
+  useEffect(() => {
+    const controller = new AbortController();
+    const fetchInfos = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params: Record<string, string | number> = { page: 0, size: 24 };
+        if (category !== "ALL") params.category = category;
+        if (keyword.trim()) params.keyword = keyword.trim();
+        const res = await api.get<{ data: PageData }>("/infos", {
+          params,
+          signal: controller.signal,
+        });
+        setItems(res.data.data.content);
+      } catch (err) {
+        if (axios.isCancel(err)) return;
+        const message =
+          axios.isAxiosError(err) && err.response?.data?.message
+            ? err.response.data.message
+            : "정보를 불러오지 못했습니다.";
+        setError(message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const timer = setTimeout(fetchInfos, 200);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [category, keyword]);
 
   const tabs: { key: CategoryKey | "ALL"; label: string }[] = [
@@ -53,12 +87,14 @@ export default function HomePage() {
               placeholder="제목 · 태그 검색"
               className="w-56 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none"
             />
-            <Link
-              href="/info/new"
-              className="rounded-md bg-brand-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
-            >
-              + 정보 작성
-            </Link>
+            {user && (
+              <Link
+                href="/info/new"
+                className="rounded-md bg-brand-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                + 정보 작성
+              </Link>
+            )}
           </div>
         </div>
 
@@ -78,7 +114,17 @@ export default function HomePage() {
           ))}
         </div>
 
-        <InfoGrid items={filtered} />
+        {error && (
+          <p className="mb-4 rounded bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {error}
+          </p>
+        )}
+
+        {loading ? (
+          <p className="py-12 text-center text-sm text-gray-400">불러오는 중...</p>
+        ) : (
+          <InfoGrid items={items} />
+        )}
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-6">

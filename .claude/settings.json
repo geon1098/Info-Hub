@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(npx tsc *)",
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "Bash(dir c:\\\\infonowapp)",
+      "Bash(./gradlew clean *)",
+      "Bash(docker run *)",
+      "Bash(docker exec *)",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" \"http://localhost:8093/api/infos?page=0&size=24\")",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" \"http://localhost:8093/api/posts?page=0&size=10\")",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" \"http://localhost:8093/api/posts/2/comments\")"
     ]
   }
 }

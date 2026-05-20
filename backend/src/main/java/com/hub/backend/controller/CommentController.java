@@ -27,14 +27,14 @@ public class CommentController {
 	private final CommentService commentService;
 	
 	@GetMapping("/api/posts/{postId}/comments")
-	public ApiResponse<List<CommentResponse>> list(@PathVariable Long postId){
+	public ApiResponse<List<CommentResponse>> list(@PathVariable("postId") Long postId){
 		return ApiResponse.ok(commentService.findComments(postId));
 	}
 	
 	@PostMapping("/api/posts/{postId}/comments")
 	public ApiResponse<CommentResponse> create(
 			@AuthenticationPrincipal Long userId,
-			@PathVariable Long postId,
+			@PathVariable("postId") Long postId,
 			@Valid @RequestBody CommentRequest request){
 		return ApiResponse.ok("댓글이 등록되었습니다.",
 				commentService.createComment(userId, postId, request));
@@ -43,7 +43,7 @@ public class CommentController {
 	@PutMapping("/api/comments/{id}")
 	public ApiResponse<CommentResponse> update(
 			@AuthenticationPrincipal Long userId,
-			@PathVariable Long id,
+			@PathVariable("id") Long id,
 			@Valid @RequestBody CommentRequest request
 			){
 		return ApiResponse.ok("댓글이 수정되었습니다.",
@@ -54,7 +54,7 @@ public class CommentController {
 	public ApiResponse<Void> delete(
 			@AuthenticationPrincipal Long userId,
 			Authentication authentication,
-			@PathVariable Long id
+			@PathVariable("id") Long id
 			){
 		String role = 
 	authentication.getAuthorities().iterator().next().getAuthority()

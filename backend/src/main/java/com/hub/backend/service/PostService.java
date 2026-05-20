@@ -17,6 +17,7 @@ import com.hub.backend.entity.User;
 import com.hub.backend.exception.CustomException;
 import com.hub.backend.exception.ErrorCode;
 import com.hub.backend.repository.CategoryRepository;
+import com.hub.backend.repository.CommentRepository;
 import com.hub.backend.repository.PostRepository;
 import com.hub.backend.repository.UserRepository;
 
@@ -30,6 +31,7 @@ public class PostService {
 	private final PostRepository postRepository;
 	private final CategoryRepository categoryRepository;
 	private final UserRepository userRepository;
+	private final CommentRepository commentRepository;
 	
 	@Transactional
 	public PostResponse createPost(Long userId, PostCreateRequest request) {
@@ -48,22 +50,23 @@ public class PostService {
 				.author(user)
 				.category(category)
 				.build();
-		return PostResponse.from(postRepository.save(post));
+		Post saved = postRepository.save(post);
+		return PostResponse.from(saved, 0L);
 	}
 
 	public PageResponse<PostResponse> findPosts(String categoryCode, int page, int size){
 		PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
 		Page<Post> result = (categoryCode == null || categoryCode.isBlank()) ? postRepository.findAllBy(pageable) : postRepository.findAllByCategoryCode(categoryCode, pageable);
-		return PageResponse.of(result, PostResponse::from);
+		return PageResponse.of(result, p -> PostResponse.from(p, commentRepository.countByPostId(p.getId())));
 	}
-	
+
 	@Transactional
 	public PostResponse findPost(Long id) {
 		Post post = postRepository.findById(id)
 				.orElseThrow(() -> new
 	CustomException(ErrorCode.POST_NOT_FOUND));
 		post.increaseViewCount();
-		return PostResponse.from(post);
+		return PostResponse.from(post, commentRepository.countByPostId(id));
 	}
 	
 	
@@ -82,7 +85,7 @@ public class PostService {
 	CustomException(ErrorCode.CATEGORY_NOT_FOUND));
 		
 		post.update(request.getTitle(), request.getContent(), category);
-		return PostResponse.from(post);
+		return PostResponse.from(post, commentRepository.countByPostId(postId));
 	}
 	
 	

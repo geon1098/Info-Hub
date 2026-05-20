@@ -42,6 +42,8 @@ public class SecurityConfig {
 					.requestMatchers("/api/health").permitAll()
 					.requestMatchers("/api/auth/**").permitAll()
 					.requestMatchers(HttpMethod.GET, "/api/posts/**").permitAll()
+					.requestMatchers(HttpMethod.GET, "/api/infos/**").permitAll()
+					.requestMatchers("/images/**").permitAll()
 					//관리자 전용
 					.requestMatchers("/api/admin/**").hasRole("ADMIN")
 					//그 외에는 인증 필요

@@ -16,11 +16,16 @@ public class PostResponse {
 	private String category;
 	private String author;
 	private Long authorId;
-	private long ciewCount;
+	private long viewCount;
+	private long commentCount;
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
-	
+
 	public static PostResponse from(Post post) {
+		return from(post, 0L);
+	}
+
+	public static PostResponse from(Post post, long commentCount) {
 		return new PostResponse(
 				post.getId(),
 				post.getTitle(),
@@ -29,8 +34,9 @@ public class PostResponse {
 				post.getAuthor().getNickname(),
 				post.getAuthor().getId(),
 				post.getViewCount(),
+				commentCount,
 				post.getCreatedAt(),
 				post.getUpdatedAt()
-				);
+		);
 	}
 }

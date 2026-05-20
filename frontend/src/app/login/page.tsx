@@ -3,8 +3,16 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import axios from "axios";
 import { useAuth } from "@/lib/authStore";
-import { MOCK_USER } from "@/lib/mockData";
+import { api } from "@/lib/api";
+import { User } from "@/types";
+
+interface LoginResponseData {
+  accessToken: string;
+  tokenType: string;
+  user: User;
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,8 +20,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -22,24 +31,26 @@ export default function LoginPage() {
       return;
     }
 
-    // TODO: POST /api/auth/login 연결
-    // 현재는 mock 처리
-    if (email === MOCK_USER.email) {
-      sessionStorage.setItem("accessToken", "mock-access-token");
-      setAuth(MOCK_USER, "mock-access-token");
-      router.push("/");
-      return;
-    }
+    try {
+      setSubmitting(true);
+      const res = await api.post<{ data: LoginResponseData }>("/auth/login", {
+        email,
+        password,
+      });
+      const { accessToken, user } = res.data.data;
 
-    if (email === "admin@infohub.dev") {
-      const admin = { ...MOCK_USER, id: 99, email, nickname: "관리자", role: "ADMIN" as const };
-      sessionStorage.setItem("accessToken", "mock-admin-token");
-      setAuth(admin, "mock-admin-token");
+      sessionStorage.setItem("accessToken", accessToken);
+      setAuth(user, accessToken);
       router.push("/");
-      return;
+    } catch (err) {
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "로그인에 실패했습니다.";
+      setError(message);
+    } finally {
+      setSubmitting(false);
     }
-
-    setError("이메일 또는 비밀번호가 올바르지 않습니다.");
   };
 
   return (
@@ -60,7 +71,7 @@ export default function LoginPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="demo@infohub.dev"
+            placeholder="you@example.com"
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
           />
         </div>
@@ -86,9 +97,10 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          className="w-full rounded-md bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          disabled={submitting}
+          className="w-full rounded-md bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          로그인
+          {submitting ? "로그인 중..." : "로그인"}
         </button>
 
         <p className="text-center text-xs text-gray-500">
@@ -98,10 +110,6 @@ export default function LoginPage() {
           </Link>
         </p>
       </form>
-
-      <p className="mt-3 text-center text-[11px] text-gray-400">
-        데모: <code>demo@infohub.dev</code> / <code>admin@infohub.dev</code>
-      </p>
     </div>
   );
 }

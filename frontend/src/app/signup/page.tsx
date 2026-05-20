@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import axios from "axios";
+import { api } from "@/lib/api";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -13,12 +15,13 @@ export default function SignupPage() {
     nickname: "",
   });
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -35,9 +38,24 @@ export default function SignupPage() {
       return;
     }
 
-    // TODO: POST /api/auth/signup 연결
-    alert("회원가입이 완료되었습니다. 로그인해주세요.");
-    router.push("/login");
+    try {
+      setSubmitting(true);
+      await api.post("/auth/signup", {
+        email: form.email,
+        password: form.password,
+        nickname: form.nickname,
+      });
+      alert("회원가입이 완료되었습니다. 로그인해주세요.");
+      router.push("/login");
+    } catch (err) {
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "회원가입에 실패했습니다.";
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -112,9 +130,10 @@ export default function SignupPage() {
 
         <button
           type="submit"
-          className="w-full rounded-md bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          disabled={submitting}
+          className="w-full rounded-md bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          가입하기
+          {submitting ? "처리 중..." : "가입하기"}
         </button>
 
         <p className="text-center text-xs text-gray-500">
